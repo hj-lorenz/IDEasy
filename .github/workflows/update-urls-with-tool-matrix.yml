@@ -1,0 +1,103 @@
+name: Update URLs with tool matrix
+run-name: Nightly update of URLs
+
+# Controls when the workflow will run
+on:
+  workflow_dispatch:
+
+  #schedule:
+  #  - cron: '56 09   * * *'
+jobs:
+
+  #Execute unit tests for updater only once
+  testUpdater:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout ide
+        uses: actions/checkout@v3
+        with:
+          submodules: recursive
+      - name: Set up Java
+        uses: actions/setup-java@v3
+        with:
+          java-version: 17
+          distribution: 'temurin'
+          cache: 'maven'
+      - name: Build and run url updater
+        run: |
+          cd cli
+          mvn -B -ntp -DskipTests -Dstyle.color=always install
+
+  # Create list of tools dynamically
+  create-tool-list:
+    name: create-tool-list
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+
+    steps:
+      - name: Checkout ide
+        uses: actions/checkout@v3
+        with:
+          submodules: recursive
+      - name: PWD
+        run: |
+          pwd
+      - name: Create-Urls-4-test
+        run: |
+          cd cli/..
+          pwd
+          mkdir ide-urls
+          mkdir ide-urls/pip
+          mkdir ide-urls/jasypt
+          mkdir ide-urls/eclipse
+          mkdir ide-urls/eclipse/cpp
+          pwd
+      - name: Set Matrix
+        id: set-matrix
+        #           echo "name=matrix::$(ls -lRd * | grep '^d' | gawk '{printf("%s, ",$9)}' | sed -e 's/,\ *$//')"  >> $GITHUB_OUTPUT
+        run: |
+          pwd
+          ls -la
+          cd cli/../ide-urls
+          pwd
+          ls -lRd *
+          ls -lRd * | grep '^d'
+          ls -lRd * | grep '^d' | gawk '{printf("%s, ",$9)}' | sed -e 's/,\ *$//'
+          echo "name=matrix::$(ls -lRd * | jq -R -s -c 'split("\n")[:-1]')"  >> $GITHUB_OUTPUT
+  
+  
+  # Update URLS from matrix (list)
+  IDEasy-update-urls:
+    runs-on: ubuntu-latest
+    needs: [ testUpdater, create-tool-list ]
+    strategy:
+      matrix:
+        ${{ steps.set-matrix.outputs.matrix }}
+        ${{ fromJson(needs.create-tool-list.outputs.matrix) }}
+      #tool-name: [ jmc, pip, jasypt ]
+      fail-fast: false
+    steps:
+      - name: Checkout ide
+        uses: actions/checkout@v3
+        with:
+          submodules: recursive
+      - name: Set up Java
+        uses: actions/setup-java@v3
+        with:
+          java-version: 17
+          distribution: 'temurin'
+          cache: 'maven'
+      - name: Build and run url updater
+        run: |
+          toolName="${{ matrix.tool-name }}"
+          echo "ToolName: [$toolName]"
+          if [ "$toolName" != null ] && [ ! -z "$toolName" ] 
+          then
+            cd cli
+            mkdir ../ide-urls
+            mvn -B -ntp -Dstyle.color=always -DskipTests install          
+            mvn -B -ntp -Dstyle.color=always -DskipTests exec:java -Dexec.mainClass="com.devonfw.tools.ide.url.UpdateInitiator" -Dexec.args="../ide-urls PT5H30M $toolName"
+          else
+            echo "ERROR: Updater not startet due tool-name is null or empty"
+          fi
